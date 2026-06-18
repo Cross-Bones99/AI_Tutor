@@ -1,18 +1,14 @@
 import os
 import streamlit as st
 
-from rag_chain import ask_question
-from utils.vector_store import create_vectorstore_from_pdfs
-from rag_chain import stream_answer
+from pages.chat_page import show_chat_page
+from pages.quiz_page import show_quiz_page
+from pages.study_planner import show_study_planner
 
-from utils.vector_store import get_vectorstore
-from utils.vector_store import add_pdf_to_vectorstore
-
-
-from agents.graph import graph
-from rag_chain import llm
-
-
+from utils.vector_store import (
+    get_vectorstore,
+    add_pdf_to_vectorstore
+)
 
 # ----------------------------------
 # Page Config
@@ -25,7 +21,9 @@ st.set_page_config(
 )
 
 st.title("📚 AI Tutor")
-st.markdown("Upload a PDF and ask questions about it.")
+st.markdown(
+    "An AI-powered learning platform with Chat, Quiz Generation, and Study Planning."
+)
 
 # ----------------------------------
 # Session State
@@ -38,213 +36,132 @@ if "vectorstore" not in st.session_state:
     st.session_state.vectorstore = get_vectorstore()
 
 # ----------------------------------
-# Cache Vector Store
+# Sidebar - Knowledge Base
 # ----------------------------------
 
+st.sidebar.header("📚 Knowledge Base")
 
-# ----------------------------------
-# PDF Upload
-# ----------------------------------
-
-uploaded_files = st.file_uploader(
-    "Upload a PDF",
+uploaded_files = st.sidebar.file_uploader(
+    "Upload PDFs",
     type=["pdf"],
     accept_multiple_files=True
 )
 
 if uploaded_files:
 
-    current_files = tuple(
-        sorted(file.name for file in uploaded_files)
+    os.makedirs(
+        "uploads",
+        exist_ok=True
     )
-
-    os.makedirs("temp", exist_ok=True)
-
-    pdf_paths = []
 
     for uploaded_file in uploaded_files:
 
         pdf_path = os.path.join(
-        "uploads",
-        uploaded_file.name
+            "uploads",
+            uploaded_file.name
         )
 
-        os.makedirs(
-                "uploads",
-                exist_ok=True
-            )
-
         with open(pdf_path, "wb") as f:
-                f.write(uploaded_file.getbuffer())
+            f.write(
+                uploaded_file.getbuffer()
+            )
 
         added = add_pdf_to_vectorstore(
-                pdf_path
-            )
+            pdf_path
+        )
 
         if added:
-                st.success(
-                    f"{uploaded_file.name} indexed"
-                )
+
+            st.sidebar.success(
+                f"✅ {uploaded_file.name} indexed"
+            )
+
         else:
-                st.warning(
-                    f"{uploaded_file.name} already exists"
-                )
 
-        st.session_state.indexed_files = current_files
-
-        st.success("PDF indexed successfully!")
-
-
-
-
+            st.sidebar.warning(
+                f"⚠️ {uploaded_file.name} already exists"
+            )
 
 # ----------------------------------
-# Display Chat History
+# Display Indexed Documents
 # ----------------------------------
 
-for msg in st.session_state.messages:
+st.sidebar.divider()
 
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
-
-# ----------------------------------
-# Chat Input
-# ----------------------------------
-
-prompt = st.chat_input(
-    "Ask a question about the PDF..."
+st.sidebar.subheader(
+    "Indexed Documents"
 )
 
-# ----------------------------------
-# Process Query
-# ----------------------------------
+try:
 
-if prompt:
+    collection = (
+        st.session_state.vectorstore.get()
+    )
 
-    if st.session_state.vectorstore is None:
+    files = set()
 
-        st.warning(
-            "Please upload a PDF first."
+    for metadata in collection["metadatas"]:
+
+        if metadata:
+
+            files.add(
+                metadata.get(
+                    "source_file",
+                    "Unknown"
+                )
+            )
+
+    if files:
+
+        for file in sorted(files):
+
+            st.sidebar.write(
+                f"📄 {file}"
+            )
+
+        st.sidebar.success(
+            f"Total PDFs: {len(files)}"
         )
 
     else:
 
-        # User Message
-
-        with st.sidebar:
-            st.header("Knowledge Base")
-
-            collection = (
-        st.session_state.vectorstore.get()
+        st.sidebar.info(
+            "No PDFs indexed yet."
         )
 
-        files = set()
+except Exception:
 
-        for metadata in collection["metadatas"]:
+    st.sidebar.info(
+        "No documents available."
+    )
 
-            if metadata:
-                files.add(
-                    metadata.get(
-                        "source_file",
-                        "Unknown"
-                    )
-                )
+# ----------------------------------
+# Navigation
+# ----------------------------------
 
-        for file in sorted(files):
+st.sidebar.divider()
 
-            st.write(
-                f"📄 {file}"
-            )
+page = st.sidebar.selectbox(
+    "Choose Feature",
+    [
+        "Chat Assistant",
+        "Quiz Generator",
+        "Study Planner"
+    ]
+)
 
-        st.write(
-            f"Total PDFs: {len(files)}"
-        )
+# ----------------------------------
+# Route Pages
+# ----------------------------------
 
-            
+if page == "Chat Assistant":
 
-        st.session_state.messages.append(
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            )
+    show_chat_page()
 
-        with st.chat_message("user"):
-            st.markdown(prompt)
+elif page == "Quiz Generator":
 
+    show_quiz_page()
 
+elif page == "Study Planner":
 
-        # Assistant Response
-
-        with st.chat_message("assistant"):
-
-            with st.spinner("Thinking..."):
-
-                history = ""
-
-                for msg in st.session_state.messages[-6:]:
-
-                    history += (
-                        f"{msg['role']}: {msg['content']}\n"
-                    )
-
-                result = graph.invoke(
-                    {
-                        "question": prompt,
-                        "route": "",
-                        "answer": "",
-                        "vectorstore": st.session_state.vectorstore,
-                        "llm": llm,
-                        "history": history
-                    }
-                )
-
-            full_response = result["answer"]
-
-            placeholder = st.empty()
-            placeholder.markdown(full_response)
-
-            st.caption(
-                f"🧭 Route Used: {result['route'].upper()}"
-            )
-
-
-            if result["route"] == "rag":
-
-                with st.expander("📄 Sources"):
-
-                    for doc in result["sources"]:
-
-                        page = doc.metadata.get("page", "Unknown")
-
-                        source_file = doc.metadata.get(
-                            "source_file",
-                            "Unknown"
-                        )
-
-                        st.markdown(
-                            f"**File:** {source_file}"
-                        )
-
-                        st.markdown(
-                            f"**Page:** {page + 1}"
-                        )
-
-                        st.write(
-                            doc.page_content[:500]
-                        )
-            else:
-                st.info("Answer generated from web search.")
-
-
-        
-        # Saves Chat History
-        st.session_state.messages.append(
-            {
-                "role": "assistant",
-                "content": full_response
-            }
-        )
-
-
-        
+    show_study_planner()

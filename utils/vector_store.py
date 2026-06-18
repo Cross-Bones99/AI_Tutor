@@ -55,6 +55,7 @@ def create_vectorstore_from_pdfs(pdf_paths):
     vectorstore.add_documents(
         documents=chunks,
         ids=ids
+
     )
 
     return vectorstore
@@ -89,6 +90,14 @@ def add_pdf_to_vectorstore(pdf_path):
 
     chunks = splitter.split_documents(docs)
 
-    vectorstore.add_documents(chunks)
+    ids = [
+        str(uuid.uuid4())
+        for _ in chunks
+    ]
+
+    vectorstore.add_documents(
+        documents=chunks,
+        ids=ids
+    )
 
     return True
